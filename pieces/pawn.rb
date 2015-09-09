@@ -24,12 +24,7 @@ class Pawn < Piece
     steps
   end
 
-  def defensive_moves
-    self.side_attacks(true)
-  end
-
-
-  def side_attacks(defending = false)
+  def side_attacks
     i, j = pos
 
     side_moves = [[i + forward_dir, j - 1], [i + forward_dir, j + 1]]
@@ -37,11 +32,7 @@ class Pawn < Piece
     side_moves.select do |new_pos|
       if board.valid_pos?(new_pos)
         threatened_piece = board[new_pos]
-        unless defending
-          threatened_piece && threatened_piece.color != color
-        else
-          threatened_piece && threatened_piece.color == color
-        end
+        threatened_piece && threatened_piece.color != color
       else
         false
       end

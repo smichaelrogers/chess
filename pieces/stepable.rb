@@ -1,5 +1,5 @@
 module Stepable
-  def moves(defending = false)
+  def moves
     move_diffs.each_with_object([]) do |(dx, dy), moves|
       cur_x, cur_y = pos
       pos = [cur_x + dx, cur_y + dy]
@@ -14,14 +14,9 @@ module Stepable
     end
   end
 
-  def defensive_moves
-    self.moves(true)
-  end
-
   private
 
   def move_diffs
-    # subclass implements this
     raise NotImplementedError
   end
 end

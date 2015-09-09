@@ -5,11 +5,13 @@ class King < Piece
   include Stepable
 
   def adjacent_tiles
-    move_diffs.map do |diff|
-      [diff[0] + pos[0], diff[1] + pos[1]]
-    end.select do |m|
-      m < 8 && m >= 0
+    t = []
+    move_diffs.each do |diff|
+      if pos[0] + diff[0] >= 0 && pos[0] + diff[0] <= 7 && pos[1] + diff[1] >= 0 && pos[1] + diff[1] <= 7
+        t << [pos[0] + diff[0], pos[1] + diff[1]]
+      end
     end
+    t
   end
 
 

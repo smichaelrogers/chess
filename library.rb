@@ -9,9 +9,6 @@ require_relative 'pieces/bishop'
 require_relative 'pieces/knight'
 require_relative 'pieces/pawn'
 
-STACKED_PAWN_PENALTY = 50
-PAWN_SHIELD_VALUE = 50
-KING_THREAT_MULTIPLIER = 100
 NEG_INFINITY = -1.0 / 0.0
 POS_INFINITY = +1.0 / 0.0
 HORIZONTAL_DIRS = [
@@ -36,31 +33,25 @@ PIECE_POSITIONS = [
   Knight,
   Rook
 ]
-PAWN_ID = [:outer, :outer, :mid, :queen_side, :king_side, :mid, :outer, :outer]
-PIECE_ID = [:rook, :knight, :bishop, :queen, :king, :bishop, :knight, :rook]
 MATERIAL = {
   Pawn: 100.0,
   Knight: 300.0,
   Bishop: 320.0,
   Rook: 400.0,
   Queen: 800.0,
-  King: 16000.0
+  King: 2400.0
 }
-ACTION = {
-  Pawn: 10.0,
-  Knight: 8.0,
-  Bishop: 7.0,
-  Rook: 5.0,
-  Queen: 3.0,
-  King: 1.0
-}
-MOBILITY = {
-  Pawn: 10.0,
-  Knight: 20.0,
-  Bishop: 30.0,
-  Rook: 30.0,
-  Queen: 40.0,
-  King: 20.0
+
+RANKS = ["１","２","３","４","５","６","７","８"]
+FILES = ["ａ", "ｂ", "ｃ", "ｄ", "ｅ", "ｆ", "ｇ", "ｈ"]
+
+PIECE_KEY = {
+  p: :Pawn,
+  n: :Knight,
+  b: :Bishop,
+  r: :Rook,
+  q: :Queen,
+  k: :King
 }
 SYMBOLS = {
   King: {
@@ -150,29 +141,4 @@ SQUARES = {
     [ 20, 20,  0,  0,  0,  0, 20, 20],
     [ 20, 30, 10,  0,  0, 10, 30, 20]
   ]
-}
-
-KING_LATE = [
-  [-50,-40,-30,-20,-20,-30,-40,-50],
-  [-30,-20,-10,  0,  0,-10,-20,-30],
-  [-30,-10, 20, 30, 30, 20,-10,-30],
-  [-30,-10, 30, 40, 40, 30,-10,-30],
-  [-30,-10, 30, 40, 40, 30,-10,-30],
-  [-30,-10, 20, 30, 30, 20,-10,-30],
-  [-30,-30,  0,  0,  0,  0,-30,-30],
-  [-50,-30,-30,-30,-30,-30,-30,-50]
-]
-
-FIRST_MOVE = "w_p_e4"
-
-RANKS = ["１","２","３","４","５","６","７","８"]
-FILES = ["ａ", "ｂ", "ｃ", "ｄ", "ｅ", "ｆ", "ｇ", "ｈ"]
-
-NOTATION = {
-  Pawn: "",
-  King: "K",
-  Queen: "Q",
-  Rook: "R",
-  Bishop: "B",
-  Knight: "N"
 }

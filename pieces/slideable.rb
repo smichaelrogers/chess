@@ -16,22 +16,13 @@ module Slideable
     moves
   end
 
-  def defensive_moves
-    moves = []
-    move_dirs.each do |dx, dy|
-      moves.concat(grow_unblocked_moves_in_dir(dx, dy, true))
-    end
-
-    moves
-  end
-
   private
 
   def move_dirs
     raise NotImplementedError
   end
 
-  def grow_unblocked_moves_in_dir(dx, dy, defending = false)
+  def grow_unblocked_moves_in_dir(dx, dy)
     cur_x, cur_y = pos
     moves = []
     loop do
@@ -43,16 +34,8 @@ module Slideable
       if board.empty?(pos)
         moves << pos
       else
-        # can take an opponent's piece
-
-        unless defending
-          if board[pos].color != color
-            moves << pos
-          end
-        else
-          if board[pos].color == color
-            moves << pos
-          end
+        if board[pos].color != color
+          moves << pos
         end
         break
       end

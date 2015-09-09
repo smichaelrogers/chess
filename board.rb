@@ -2,131 +2,37 @@ require_relative 'library'
 require 'json'
 require 'rainbow'
 require 'rainbow/ext/string'
-
+require 'byebug'
 class Board
-  attr_accessor :rows,
-                :material,
-                :mv,
-                :turns,
-                :initial_depth,
-                :best_move,
-                :best_pos,
-                :captures,
-                :move_list,
-                :depth_target,
-                :timer,
-                :eval_hash,
-                :eval_data,
-                :search_paths,
-                :high_cutoffs,
-                :low_cutoffs,
-                :last_alpha
-
-  attr_reader   :visits,
-                :current_line,
-                :openings,
-                :white_king,
-                :black_king
+  attr_accessor :rows, :material, :depth_target, :captures, :alpha_adj, :beta_adj, :move_list, :timer, :alpha_cutoffs, :beta_cutoffs, :visits, :white_visits, :black_visits, :last_move, :lines, :first_move, :best_pos, :best_move, :openings, :following_opening
+  attr_reader :openings, :white_king, :black_king, :render_data
 
   def initialize
-    @turns = 0
-    @depth_target = 2
-    @best_move
-    @best_pos
-    @last_alpha
-    @move_list = []
-    @true_move = false
-    @timer = Time.new
     @rows = Array.new(8){Array.new(8)}
-    @eval_hash = Hash.new {|h, k| h[k] = {
-        white_piece_on: false,
-        black_piece_on: false,
-        white_in_range: 0,
-        black_in_range: 0,
-        white_king_adjacent: false,
-        black_king_adjacent: false,
-        age: 0
-      }
-    }
-
-    # key will be turn number
-    @high_cutoffs = Hash.new{|h, k| h[k] = {
-        depth: 0,
-        max: true
-      }
-    }
-
-    # key will be turn number
-    @low_cutoffs = Hash.new{|h, k| h[k] = {
-        depth: 0,
-        min: true
-      }
-    }
-
-    # set key to turn + depth, to compare to similar
-    @search_paths = Hash.new {|h, k| h[k] = {
-        high: POS_INFINITY,
-        low: NEG_INFINITY,
-        max: true,
-        depth: 0,
-        turn: 0
-      }
-    }
-
-    # update dynamically, clear when spread is too large or high
-    # or a duration has expired
-    @eval_data = Hash.new {|h, k| h[k] = {
-        search_path: [],
-        depth: 0,
-        score: 0,
-        white_captures: 0,
-        black_captures: 0,
-        white_king_threat: 0,
-        black_king_threat: 0,
-        white_positioning: 0,
-        black_positioning: 0,
-        age: 0
-      }
-    }
-    @visits = Hash.new {|h, k| h[k] = {
-      alpha_visits: 0,
-      beta_visits: 0,
-      evaluation: 0,
-      num_beta: 0,
-      num_alpha: 0,
-      age: 0
-      }
+    @visits = Array.new(8){Array.new(8){ {white: 0, black: 0} } }
+    @move_list = Array.new([])
+    @material = {
+      Pawn: 0,
+      Knight: 0,
+      Bishop: 0,
+      Rook: 0,
+      Queen: 0,
+      King: 0
     }
     @captures = {
       white: [],
       black: []
     }
-    @mv = {
-      white: 0,
-      black: 0
-    }
-    @material = {
-       white: {
-         Pawn: 8,
-         Knight: 2,
-         Bishop: 2,
-         Rook: 2,
-         Queen: 1,
-         King: 1
-       },
-       black: {
-         Pawn: 8,
-         Knight: 2,
-         Bishop: 2,
-         Rook: 2,
-         Queen: 1,
-         King: 1
-       }
-     }
-    @white_king
-    @black_king
+    @following_opening = true
+    @render_data = false
+    @first_move = true
+    @depth_target = 0
+    @time_elapsed = 0
+    @alpha_adj, @beta_adj = NEG_INFINITY, POS_INFINITY
+    @timer = Time.new
+    @white_visits, @black_visits = 1, 1
     @openings = Board.opening_book("openings.json")
-    @lines =  @openings["w_p_e4"].first
+    @lines = @openings
     setup
   end
 
@@ -134,69 +40,101 @@ class Board
     JSON.load(IO.read(filename))
   end
 
+  def display_data(toggle = true)
+    @render_data = toggle
+  end
+
   #=====================================================================
   # player functions
   #=====================================================================
-
   def black_move(from_pos, to_pos)
-    if valid_pos?(from_pos) && valid_pos?(to_pos) && self[from_pos]
-      if self[from_pos].color != :white && self[from_pos].valid_moves.include?(to_pos)
-        real_move!(from_pos, to_pos)
-      else
-        return false
+    real_move!(from_pos, to_pos)
+    @last_move = self[to_pos].line_key
+  end
+
+  def white_move!
+    @depth_target = 4
+    unless move_available?
+      @timer = Time.new
+      @alpha_adj, @beta_adj = NEG_INFINITY, POS_INFINITY
+      @white_visits, @black_visits = 1, 1
+      # while Time.new - timer < 16
+      score = search_max(alpha_adj, beta_adj, @depth_target)
+      evaluate(true)
+      # @depth_target += 2
+      # end
+    end
+    real_move!(@best_pos, @best_move)
+    reset_search_data
+  end
+
+  def reset_search_data
+    white_visits, black_visits = 1, 1
+    visits.each { |row| row.each {|tile| tile[:white], tile[:black] = 0, 0 } }
+  end
+
+  def move_available?
+    return false unless following_opening
+    if first_move
+      @lines = lines["w_p_e4"]
+      @first_move = false
+      @best_pos, @best_move = [6, 4], [4, 4]
+      return true
+    end
+    if @lines.nil?
+      @following_opening = false
+    elsif @lines[last_move]
+      @lines = @lines[last_move]
+      m = @lines.first
+      d = parse_move(m.first)
+      if d
+        piece = pieces.find do |n|
+          n.color == d[:color] && n.class_sym == d[:piece] && n.valid_moves && n.valid_moves.include?(d[:pos])
+        end
+        if piece
+          @best_pos, @best_move = piece.pos, d[:pos]
+          return true
+        end
       end
     else
-      return false
+      @following_opening = false
+      puts "Deviated from opening pattern, things may slow down"
     end
-    true
+    false
   end
-  DEPTH_INITIAL = 2
-  DEPTH_DELTA = 2
-  DEPTH_FINAL = 12
 
 
   #=====================================================================
   # search
   #=====================================================================
-  def white_move!
-    @best_pos, @best_move = nil, nil
-    depth_target = DEPTH_INITIAL
-    timer = Time.new
-    score = search_max(NEG_INFINITY, POS_INFINITY, DEPTH_INITIAL)
-    evaluate(true)
-    time_elapsed = timer - Time.new
-
-    real_move!(@best_pos, @best_move)
-  end
-
 
   def search_max(alpha, beta, current_depth)
-    if current_depth == 0
-      return evaluate
-    end
+    return evaluate if current_depth <= 0
     target = nil
-    selective(:white).each do |pos|
+    move_group = order_moves(:white)
+    move_group.each do |m|
+      pos, move = m[0], m[1]
       piece = self[pos]
-      next if piece.valid_moves.empty?
-      piece.valid_moves.each do |move|
-        if self[move]
-          target = self[move]
-        end
-        move_piece!(pos, move)
-        score = search_min(alpha, beta, current_depth - 1)
-        undo!(move, pos)
-        if target
-          self[move] = target
-          target = nil
-        end
-        if score >= beta
-          return beta
-        elsif score > alpha
-          alpha = score
-          if current_depth == depth_target
-            @best_move = move
-            @best_pos = pos
-          end
+      if self[move]
+        target = self[move]
+        @material[target.class_sym] += 1
+      end
+      move_piece!(pos, move)
+      score = search_min(alpha, beta, current_depth - 1)
+      undo!(move, pos)
+      if target
+        @material[target.class_sym] -= 1
+        self[move] = target
+        target = nil
+      end
+      @white_visits += 1
+      @visits[move[0]][move[1]][:white] += 1
+      if score >= beta
+        return beta
+      elsif score > alpha
+        alpha = score
+        if current_depth == @depth_target
+          @best_pos, @best_move = pos, move
         end
       end
     end
@@ -204,29 +142,30 @@ class Board
   end
 
   def search_min(alpha, beta, current_depth)
-    if current_depth == 0
-      return  0 - evaluate
-    end
+    return 0 - evaluate if current_depth <= 0
     target = nil
-    selective(:black).each do |pos|
+    move_group = order_moves(:black)
+    move_group.each do |m|
+      pos, move = m[0], m[1]
       piece = self[pos]
-      next if piece.valid_moves.empty?
-      piece.valid_moves.each do |move|
-        if self[move]
-          target = self[move]
-        end
-        move_piece!(pos, move)
-        score = search_max(alpha, beta, current_depth - 1)
-        undo!(move, pos)
-        if target
-          self[move] = target
-          target = nil
-        end
-        if score <= alpha
-          return alpha
-        elsif score < beta
-          beta = score
-        end
+      if self[move]
+        target = self[move]
+        @material[target.class_sym] -= 1
+      end
+      move_piece!(pos, move)
+      score = search_max(alpha, beta, current_depth - 1)
+      undo!(move, pos)
+      if target
+        @material[target.class_sym] += 1
+        self[move] = target
+        target = nil
+      end
+      @black_visits += 1
+      @visits[move[0]][move[1]][:black] += 1
+      if score <= alpha
+        return alpha
+      elsif score < beta
+        beta = score
       end
     end
     beta
@@ -236,95 +175,71 @@ class Board
   # evaluation
   #=====================================================================
 
-  def selective(color)
-    coords = []
-    pieces.sort_by{|p| -p.mv }.each do |piece|
-      unless piece.color != color
-        coords << piece.pos
+  def order_moves(color)
+    if color == :white
+      other_color, other_total_visits, total_visits = :black, black_visits, white_visits
+    else
+      other_color, other_total_visits, total_visits = :white, white_visits, black_visits
+    end
+    moves = []
+    friends, enemies = 0, 0
+    rating = 0
+    pc = pieces.select{|p| p.color == color}
+    pc.each do |piece|
+      piece.valid_moves.each do |move|
+        friends = @visits[move[0]][move[1]][color] / total_visits
+        enemies = @visits[move[0]][move[1]][other_color] / other_total_visits
+        rating = (8 * (friends - enemies)) + piece.positioning_after_move(move)
+        moves << [piece.pos, move, rating]
       end
     end
-    coords
+    moves.sort_by { |m| -m[2] }
   end
 
-
-  # should mostly be the tiles adjacent to a king that have more pieces attacking than defending
-  # if difference is > 1 then that should be a substantial increase
-  def eval_king_danger
-    white_king_threat, black_king_threat = 0, 0
-    white_pawn_shield, black_pawn_shield = 0, 0
-
-    @white_king.adjacent_tiles.each do |tile|
-      white_king_threat = (eval_hash[tile[:black_in_range] - eval_hash[tile][:white_in_range])
-      if white_king_threat > 1
+  def eval_positioning
+    n = 0
+    wv, bv = 0, 0
+    pieces.each do |p|
+      n += ( p.color == :white ? p.positioning : 0 - p.positioning )
+      wv += @visits[p.pos[0]][p.pos[1]][:white]
+      bv += @visits[p.pos[0]][p.pos[1]][:black]
     end
-    @black_king.adjacent_tiles.each do |tile|
-      black_king_threat = (eval_hash[tile[:white_in_range] - eval_hash[tile][:black_in_range])
+    (n + (((wv / white_visits) - (bv / black_visits)) * 100)) / 10
+  end
+
+  def eval_king_threat
+    n = 0.0
+    wv, bv = 0.0, 0.0
+    white_king.adjacent_tiles.each do |tile|
+      wv, bv = @visits[tile[0]][tile[1]][:white], @visits[tile[0]][tile[1]][:black]
+      n += (((wv / white_visits) - (bv / black_visits)) * 160.0)
     end
-
-    king_threat - pawn_shield
-  end
-
-  def eval_threats
-    white_threats = 0
-    black_threats = 0
-    @eval_board.each do |tile|
-      white_threats += tile.black_in_range - tile.white_in_range
-      black_threats += tile.white_in_range - tile.black_in_range
-      if tile.black_in_range
-  end
-
-  def update_eval_hash
-    other_color = :white
-    pieces.each do |piece|
-      if piece.color == :white
-        eval_hash[piece.pos][:white_piece_on] = true
-        eval_hash[piece.pos][:black_piece_on] = false
-      else
-        eval_hash[piece.pos][:white_piece_on] = false
-        eval_hash[piece.pos][:black_piece_on] = true
-      end
-
-      if piece.valid_moves
-        piece.valid_moves.each do |pos|
-          if piece.color == :white
-            eval_hash[pos][:white_in_range] += 1
-          elsif piece.color == :black
-            eval_hash[pos][:black_in_range] += 1
-          end
-        end
-      end
+    black_king.adjacent_tiles.each do |tile|
+      wv, bv = @visits[tile[0]][tile[1]][:black], @visits[tile[0]][tile[1]][:white]
+      n -=  (((bv / black_visits) - (wv / white_visits)) * 160.0)
     end
-  end
-
-  def clear_eval_board
-    @eval_board.clear()
+    n
   end
 
   def evaluate(print_details = false)
-    eval_white, eval_black = 0, 0
-
-    update_eval_hash
-
-    white_threats, black_threats = eval_threats
-
-    white_positioning, black_positioning = eval_positioning
-
-    material_imbalance = @mv[:white] - @mv[:black]
-
-    white_king_danger = eval_king_danger(:white)
-    black_king_danger = eval_king_danger(:black)
-
-
-    w - b
+    positioning = eval_positioning
+    king_safety = eval_king_threat
+    mi = @material[:Pawn] * MATERIAL[:Pawn] +
+    @material[:Knight] * MATERIAL[:Knight] +
+    @material[:Bishop] * MATERIAL[:Bishop] +
+    @material[:Rook] * MATERIAL[:Rook] +
+    @material[:Queen] * MATERIAL[:Queen] +
+    @material[:King] * MATERIAL[:King]
+    score = mi + positioning + king_safety
+    if print_details && render_data
+      print_eval_data({mi: mi, positioning: positioning, king_safety: king_safety, score: score})
+    end
+    score
   end
-
-
-
 
   #=====================================================================
   # normal board things
   #=====================================================================
-
 
   def checkmate?(color)
     return false unless in_check?(color)
@@ -334,7 +249,7 @@ class Board
   end
 
   def in_check?(color)
-    king_pos = pieces.find{|p|p.pid == :king && p.color == color}.pos
+    king_pos = color == :white ? white_king.pos : black_king.pos
     pieces.any? do |piece|
       piece.color != color && piece.moves.include?(king_pos)
     end
@@ -343,19 +258,18 @@ class Board
   def real_move!(from_pos, to_pos)
     piece = self[from_pos]
     selected = piece.render
-    capture = nil
-    @turns += 1
-    self[from_pos] = nil
+    capture, self[from_pos] = nil, nil
     if self[to_pos]
-      @captures[self[to_pos].color] << self[to_pos]
+      @material[self[to_pos].class_sym] += (piece.color == :white ? 1 : -1)
       capture = self[to_pos].render
+      @captures[self[to_pos].color] << capture
     end
-    @move_list << Board.parse_move(selected, piece.color, to_pos, capture)
+    @move_list << Board.parse_to_render(selected, piece.color, to_pos, capture)
     self[to_pos] = piece
+    last_move = "#{piece.color.to_s[0]}_#{piece.is_a?(Knight) ? 'n' : piece.class.to_s.downcase[0]}_#{'abcdefgh'[to_pos[1]]}#{to_pos[0] + 1}"
     piece.pos = to_pos
     nil
   end
-
 
   def move_piece!(from_pos, to_pos)
     piece = self[from_pos]
@@ -373,25 +287,16 @@ class Board
     nil
   end
 
-
-
-
-
-
-
-
   #=====================================================================
   # utility
   #=====================================================================
 
   def setup
     PIECE_POSITIONS.each_with_index do |piece_class, column|
-      white_pawn = Pawn.new(:white, self, [6, column], PAWN_ID[column])
-      black_pawn = Pawn.new(:black, self, [1, column], PAWN_ID[column])
-      white_piece = piece_class.new(:white, self, [7, column], PIECE_ID[column])
-      black_piece = piece_class.new(:black, self, [0, column], PIECE_ID[column])
-      mv[:white] += white_piece.value
-      mv[:black] += black_piece.value
+      white_pawn = Pawn.new(:white, self, [6, column])
+      black_pawn = Pawn.new(:black, self, [1, column])
+      white_piece = piece_class.new(:white, self, [7, column])
+      black_piece = piece_class.new(:black, self, [0, column])
       if piece_class == King
         @white_king = white_piece
         @black_king = black_piece
@@ -399,14 +304,23 @@ class Board
     end
   end
 
+  def parse_move(move)
+    return false if move.length != 6
+    m = {}
+    move[0] == "w" ? m[:color] = :white : m[:color] = :black
+    m[:piece] = PIECE_KEY[move[2].to_sym]
+    m[:pos] = [(7 - move[5].to_i + 1), move[4].ord - 97]
+    m
+  end
+
   def find_king(color)
-    pieces.find{|p|p.pid == :king && p.color == color}
+    color == :white ? white_king : black_king
   end
 
   def [](pos)
-    fail 'invalid pos' unless valid_pos?(pos)
+    fail unless valid_pos?(pos)
     i, j = pos
-    @rows[i][j]
+    rows[i][j]
   end
 
   def []=(pos, piece)
@@ -432,16 +346,42 @@ class Board
   end
 
   #=====================================================================
-  # display
+  # stdout
   #=====================================================================
 
-  def self.parse_move(selected, color, to_pos, capture)
+  def self.parse_to_render(selected, color, to_pos, capture)
     selected += "   →  " + "abcdefgh"[to_pos[1]] + (to_pos[0] + 1).to_s
     if capture
       selected += capture
     end
     clr = (color == :white ? "◈  ".color(170,170,170) : "◈  ".color(:black))
     clr + selected
+  end
+
+  def print_eval_data(data)
+    r1, r2, h = [], [], []
+    r0 = []
+    h << "M:#{data[:mi]}"
+    h << "P:#{data[:positioning]}"
+    h << "K:#{data[:king_safety]}"
+    h << "S:#{data[:score]}"
+    @visits.each_with_index do |visit, i|
+      r1.clear; r2.clear
+      visit.each_with_index do |tile, j|
+        r1 << "W#{tile[:white].to_s.ljust(3, ' ')}"[0, 4]
+        r2 << "B#{tile[:black].to_s.ljust(3, ' ')}"[0, 4]
+      end
+      r0 << "|" + r1.join("|") + "|\n|" + r2.join("|") + "|"
+    end
+    puts move_list
+    unless following_opening
+      puts " ══════════════════════════════════"
+      puts r0.join("\n|" + ("----|" * 8) + "\n")
+      puts " ══════════════════════════════════"
+    else
+      puts " Have not deviated from opening line, insufficient data to render visit tables"
+    end
+    puts h.join(" | ")
   end
 
   def self.border(top)
@@ -463,13 +403,12 @@ class Board
   end
 
   def self.rank_marker(idx, left)
+    @move_list ||= []
     s = "#{RANKS[7 - idx]}".background(:default).color(170,170,170)
     s = (left ? " │  ".color(170,170,170) + s : s + "  │".color(170,170,170))
     unless left
-      if @move_list
-        if @move_list.length > 1
-          s += @move_list[-idx]
-        end
+      if idx < @move_list.length
+        s += @move_list[idx]
       end
     end
     s
@@ -484,7 +423,7 @@ class Board
         return fill.background(80,80,80).color(:white)
       end
     elsif piece_on
-      return fill.bright.background(:white).color(:blue)
+      return fill.bright.background(:white).color(:cyan)
     else
       return on ? fill.background(:white).color(:black) : fill.background(200,200,200).color(:black)
     end
