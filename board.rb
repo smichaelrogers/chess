@@ -98,7 +98,6 @@ class Board
       end
     else
       @following_opening = false
-      puts "Deviated from opening pattern, things may slow down"
     end
     false
   end
@@ -204,7 +203,7 @@ class Board
       wv += @visits[p.pos[0]][p.pos[1]][:white]
       bv += @visits[p.pos[0]][p.pos[1]][:black]
     end
-    (n + (((wv / white_visits) - (bv / black_visits)) * 100)) / 10
+    (n + (((wv / white_visits) - (bv / black_visits)) * 160.0)) / 6.0
   end
 
   def eval_king_threat
@@ -212,11 +211,11 @@ class Board
     wv, bv = 0.0, 0.0
     white_king.adjacent_tiles.each do |tile|
       wv, bv = @visits[tile[0]][tile[1]][:white], @visits[tile[0]][tile[1]][:black]
-      n += (((wv / white_visits) - (bv / black_visits)) * 160.0)
+      n += (((wv / white_visits) - (bv / black_visits)) * 64.0)
     end
     black_king.adjacent_tiles.each do |tile|
       wv, bv = @visits[tile[0]][tile[1]][:black], @visits[tile[0]][tile[1]][:white]
-      n -=  (((bv / black_visits) - (wv / white_visits)) * 160.0)
+      n -=  (((bv / black_visits) - (wv / white_visits)) * 64.0)
     end
     n
   end
