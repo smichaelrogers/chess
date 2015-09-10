@@ -45,7 +45,8 @@ class Game
       while true
         black_piece_position = get_first_position
         puts board.render(true, black_piece_position)
-        puts "Move #{board[black_piece_position].render} to...     (enter 'u' to unselect)"
+        puts
+        puts "Move #{board[black_piece_position].render} to...  ('u' to reselect)"
         second_entry = gets.chomp
         if second_entry.include?("u")
           puts board.render(false)
@@ -73,6 +74,7 @@ class Game
     puts "   ♚ #{player}'s turn"
     puts " ══════════════════════════════════"
     while true
+      puts "Select column and row - i.e. 'e2', 'b1', etc."
       print "Piece position: "
       entry = gets.chomp
       pos = validate_entry(entry)
