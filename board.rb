@@ -4,7 +4,7 @@ require 'rainbow'
 require 'rainbow/ext/string'
 require 'byebug'
 class Board
-  attr_accessor :rows, :material, :depth_target, :captures, :alpha_adj, :beta_adj, :move_list, :timer, :alpha_cutoffs, :beta_cutoffs, :visits, :white_visits, :black_visits, :last_move, :lines, :first_move, :best_pos, :best_move, :openings, :following_opening
+  attr_accessor :rows, :material, :depth_target, :captures, :alpha_adj, :beta_adj, :move_list, :timer, :visits, :white_visits, :black_visits, :last_move, :lines, :first_move, :best_pos, :best_move, :openings, :following_opening
   attr_reader :openings, :white_king, :black_king, :render_data
 
   def initialize
@@ -27,7 +27,6 @@ class Board
     @render_data = false
     @first_move = true
     @depth_target = 0
-    @time_elapsed = 0
     @alpha_adj, @beta_adj = NEG_INFINITY, POS_INFINITY
     @timer = Time.new
     @white_visits, @black_visits = 1, 1
@@ -40,9 +39,6 @@ class Board
     JSON.load(IO.read(filename))
   end
 
-  def display_data(toggle = true)
-    @render_data = toggle
-  end
 
   #=====================================================================
   # player functions
@@ -58,11 +54,8 @@ class Board
       @timer = Time.new
       @alpha_adj, @beta_adj = NEG_INFINITY, POS_INFINITY
       @white_visits, @black_visits = 1, 1
-      # while Time.new - timer < 16
-      score = search_max(alpha_adj, beta_adj, @depth_target)
+      score = search(alpha_adj, beta_adj, @depth_target, true)
       evaluate(true)
-      # @depth_target += 2
-      # end
     end
     real_move!(@best_pos, @best_move)
     reset_search_data
@@ -106,68 +99,49 @@ class Board
   #=====================================================================
   # search
   #=====================================================================
-
-  def search_max(alpha, beta, current_depth)
-    return evaluate if current_depth <= 0
-    target = nil
-    move_group = order_moves(:white)
-    move_group.each do |m|
+  def search(alpha, beta, depth, maximizing)
+    if depth <= 0
+      return maximizing ? evaluate : -evaluate
+    end
+    current_color = maximizing ? :white : :black
+    target, moves = nil, order_moves(current_color)
+    moves.each do |m|
       pos, move = m[0], m[1]
       piece = self[pos]
       if self[move]
         target = self[move]
-        @material[target.class_sym] += 1
+        @material[target.class_sym] += (maximizing ? 1 : -1)
       end
       move_piece!(pos, move)
-      score = search_min(alpha, beta, current_depth - 1)
-      undo!(move, pos)
+      score = search(alpha, beta, depth - 1, !maximizing)
+      move_piece!(move, pos)
       if target
-        @material[target.class_sym] -= 1
+        @material[target.class_sym] += (maximizing ? -1 : 1)
         self[move] = target
         target = nil
       end
-      @white_visits += 1
-      @visits[move[0]][move[1]][:white] += 1
-      if score >= beta
-        return beta
-      elsif score > alpha
-        alpha = score
-        if current_depth == @depth_target
-          @best_pos, @best_move = pos, move
+      if maximizing
+        @white_visits += 1
+        @visits[move[0]][move[1]][:white] += 1
+        if score >= beta
+          return beta
+        elsif score > alpha
+          alpha = score
+          if depth == depth_target
+            @best_pos, @best_move = pos, move
+          end
+        end
+      else
+        @black_visits += 1
+        @visits[move[0]][move[1]][:black] += 1
+        if score <= alpha
+          return alpha
+        elsif score < beta
+          beta = score
         end
       end
     end
-    alpha
-  end
-
-  def search_min(alpha, beta, current_depth)
-    return 0 - evaluate if current_depth <= 0
-    target = nil
-    move_group = order_moves(:black)
-    move_group.each do |m|
-      pos, move = m[0], m[1]
-      piece = self[pos]
-      if self[move]
-        target = self[move]
-        @material[target.class_sym] -= 1
-      end
-      move_piece!(pos, move)
-      score = search_max(alpha, beta, current_depth - 1)
-      undo!(move, pos)
-      if target
-        @material[target.class_sym] += 1
-        self[move] = target
-        target = nil
-      end
-      @black_visits += 1
-      @visits[move[0]][move[1]][:black] += 1
-      if score <= alpha
-        return alpha
-      elsif score < beta
-        beta = score
-      end
-    end
-    beta
+    maximizing ? alpha : beta
   end
 
   #=====================================================================
@@ -181,8 +155,7 @@ class Board
       other_color, other_total_visits, total_visits = :white, white_visits, black_visits
     end
     moves = []
-    friends, enemies = 0, 0
-    rating = 0
+    friends, enemies, rating = 0, 0, 0
     pc = pieces.select{|p| p.color == color}
     pc.each do |piece|
       piece.valid_moves.each do |move|
@@ -196,8 +169,7 @@ class Board
   end
 
   def eval_positioning
-    n = 0
-    wv, bv = 0, 0
+    n, wv, bv = 0, 0, 0
     pieces.each do |p|
       n += ( p.color == :white ? p.positioning : 0 - p.positioning )
       wv += @visits[p.pos[0]][p.pos[1]][:white]
@@ -278,13 +250,6 @@ class Board
     nil
   end
 
-  def undo!(from_pos, to_pos)
-    piece = self[from_pos]
-    self[from_pos] = nil
-    self[to_pos] = piece
-    piece.pos = to_pos
-    nil
-  end
 
   #=====================================================================
   # utility
@@ -292,8 +257,8 @@ class Board
 
   def setup
     PIECE_POSITIONS.each_with_index do |piece_class, column|
-      white_pawn = Pawn.new(:white, self, [6, column])
-      black_pawn = Pawn.new(:black, self, [1, column])
+      Pawn.new(:white, self, [6, column])
+      Pawn.new(:black, self, [1, column])
       white_piece = piece_class.new(:white, self, [7, column])
       black_piece = piece_class.new(:black, self, [0, column])
       if piece_class == King
@@ -357,13 +322,13 @@ class Board
     clr + selected
   end
 
+  def display_data(toggle = true)
+    @render_data = toggle
+  end
+
   def print_eval_data(data)
-    r1, r2, h = [], [], []
-    r0 = []
-    h << "M:#{data[:mi]}"
-    h << "P:#{data[:positioning]}"
-    h << "K:#{data[:king_safety]}"
-    h << "S:#{data[:score]}"
+    r0, r1, r2, h = [], [], [], []
+    h << "M:#{data[:mi]} P:#{data[:positioning]} K:#{data[:king_safety]} S:#{data[:score]}"
     @visits.each_with_index do |visit, i|
       r1.clear; r2.clear
       visit.each_with_index do |tile, j|
@@ -377,8 +342,6 @@ class Board
       puts " ══════════════════════════════════"
       puts r0.join("\n|" + ("----|" * 8) + "\n")
       puts " ══════════════════════════════════"
-    else
-      puts " Have not deviated from opening line, insufficient data to render visit tables"
     end
     puts h.join(" | ")
   end

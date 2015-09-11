@@ -57,7 +57,7 @@ class Piece
     end
     board.move_piece!(pos, to_pos)
     result = board.in_check?(color)
-    board.undo!(to_pos, original_pos)
+    board.move_piece!(to_pos, original_pos)
     if target
       board[to_pos] = target
       target = nil
